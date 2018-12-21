@@ -1,0 +1,48 @@
+library(ODBC)
+library(survival)
+library(broom)
+library(ggplot2)
+library(dplyr)
+
+library(stringr)
+library(printr)
+library(knitr)
+
+options(scipen = 999)
+allSurv = ODBC::read_sql("MYDATABASE",
+                           "select some_id, transplant_date, organ, gtime, gstatus from SomeDataSet.SomeView.Transplants 
+where tranplant_date between '2015-01-01' and '2016-12-31'
+                            and multiorg is NULL and prev_tx = 'N'") %>%
+  
+  
+  mutate(status = ifelse(gtime > 365.25, 0, gstatus),
+         time = ifelse(gtime > 365.25, 365.25, gtime))
+
+fit <- survfit(Surv(time, status) ~ 1, data = allSurv, conf.type = "log-log")
+fit.df <- broom::tidy(fit) %>%
+  filter(n.risk >= 10)
+
+ggplot(fit.df, aes(x = time, y = estimate)) +
+  geom_step() +
+  theme_unos()
+
+ggplot(fit.df, aes(x = time, y = estimate, ymin = conf.low, ymax = conf.high)) +
+  geom_ribbon(alpha = 0.3) +
+  geom_step() +
+  coord_cartesian(xlim = c(0, 365)) +
+  theme_unos()
+
+
+fit <- survfit(Surv(time, status) ~ organ, data = allSurv, conf.type = "log-log")
+fit.df <- broom::tidy(fit) %>%
+  rowwise() %>%
+  mutate(organ = str_split(strata, "=")[[1]][2])
+ggplot(fit.df, aes(x = time, y = estimate, color = organ)) +
+  geom_step() +
+  coord_cartesian(xlim = c(0, 365)) +
+  theme_unos()
+
+fit.df %>%
+  arrange(organ, desc(time)) %>%
+  distinct(organ, .keep_all = TRUE) %>%
+  dplyr::select(organ, n.risk, estimate, conf.low, conf.high)
